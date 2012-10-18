@@ -1,0 +1,5 @@
+DWM Status Bar for my MacBook Pro 8.2.
+
+Compile with:
+gcc -Wall -lX11 -o dwm-status-bar dwm-status-bar.c
+
