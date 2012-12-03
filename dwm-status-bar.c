@@ -46,14 +46,18 @@ void get_colour(char **colour, int number, int threshold_amber, int threshold_re
       *colour = Amber;
 }
 
-float read_file_int(char *file) {
+int read_file_int(char *file, int error) {
    FILE *fd;
-   int ret;
 
    if(!(fd = fopen(file, "r"))) {
-      fprintf(stderr, "Cannot open '%s' for reading.\n", file);
-      exit(1);
+      if (error) {
+         fprintf(stderr, "Cannot open '%s' for reading.\n", file);
+         exit(1);
+      } else {
+         return 0;
+      }
    }
+   int ret;
 
    fscanf(fd, "%d", &ret);
    fclose(fd);
@@ -62,10 +66,10 @@ float read_file_int(char *file) {
 }
 
 void get_cpu_freqs(int *cpu0, int *cpu1, int *cpu2, int *cpu3) {
-   *cpu0 = (float)read_file_int("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq")/1000;
-   *cpu1 = (float)read_file_int("/sys/devices/system/cpu/cpu1/cpufreq/scaling_cur_freq")/1000;
-   *cpu2 = (float)read_file_int("/sys/devices/system/cpu/cpu2/cpufreq/scaling_cur_freq")/1000;
-   *cpu3 = (float)read_file_int("/sys/devices/system/cpu/cpu3/cpufreq/scaling_cur_freq")/1000;
+   *cpu0 = (float)read_file_int("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq", 1)/1000;
+   *cpu1 = (float)read_file_int("/sys/devices/system/cpu/cpu1/cpufreq/scaling_cur_freq", 1)/1000;
+   *cpu2 = (float)read_file_int("/sys/devices/system/cpu/cpu2/cpufreq/scaling_cur_freq", 1)/1000;
+   *cpu3 = (float)read_file_int("/sys/devices/system/cpu/cpu3/cpufreq/scaling_cur_freq", 1)/1000;
 }
 
 void get_proc_stat_row(FILE *fd, int *idle_jiffies, int *total_jiffies) {
@@ -128,10 +132,10 @@ void get_cpu_loads(int *cpu0, int *cpu1, int *cpu2, int *cpu3) {
 }
 
 void get_cpu_temps(int *temp2, int *temp3, int *temp4, int *temp5) {
-   *temp2 = (float)read_file_int("/sys/devices/platform/coretemp.0/temp2_input")/1000;
-   *temp3 = (float)read_file_int("/sys/devices/platform/coretemp.0/temp3_input")/1000;
-   *temp4 = (float)read_file_int("/sys/devices/platform/coretemp.0/temp4_input")/1000;
-   *temp5 = (float)read_file_int("/sys/devices/platform/coretemp.0/temp5_input")/1000;
+   *temp2 = (float)read_file_int("/sys/devices/platform/coretemp.0/temp2_input", 1)/1000;
+   *temp3 = (float)read_file_int("/sys/devices/platform/coretemp.0/temp3_input", 1)/1000;
+   *temp4 = (float)read_file_int("/sys/devices/platform/coretemp.0/temp4_input", 1)/1000;
+   *temp5 = (float)read_file_int("/sys/devices/platform/coretemp.0/temp5_input", 1)/1000;
 }
 
 void format_core_str(char *cpuN, int freq, int load, int temp) {
@@ -165,8 +169,8 @@ void get_fan_str (char *fan) {
    int fan1, fan2;
    char *fan1_colour, *fan2_colour;
 
-   fan1 = read_file_int("/sys/devices/platform/applesmc.768/fan1_input");
-   fan2 = read_file_int("/sys/devices/platform/applesmc.768/fan2_input");
+   fan1 = read_file_int("/sys/devices/platform/applesmc.768/fan1_input", 1);
+   fan2 = read_file_int("/sys/devices/platform/applesmc.768/fan2_input", 1);
 
    get_colour(&fan1_colour, fan1, 4500, 5800);
    get_colour(&fan2_colour, fan2, 4500, 5800);
@@ -196,13 +200,13 @@ void get_interface_stats(char *interface, int *carrier, int *rx, int *tx) {
    char filename[41];
 
    snprintf(filename, 41, "/sys/class/net/%s/carrier", interface);
-   *carrier = read_file_int(filename);
+   *carrier = read_file_int(filename, 0);
 
    snprintf(filename, 41, "/sys/class/net/%s/statistics/rx_bytes", interface);
-   *rx = (float)read_file_int(filename)/1024/1024;
+   *rx = (float)read_file_int(filename ,0)/1024/1024;
 
    snprintf(filename, 41, "/sys/class/net/%s/statistics/tx_bytes", interface);
-   *tx = (float)read_file_int(filename)/1024/1024;
+   *tx = (float)read_file_int(filename, 0)/1024/1024;
 }
 
 int check_interface_ip(char *interface) {
@@ -229,20 +233,23 @@ void get_interface_colour(char **colour, char *interface, int carrier) {
 void get_net_str(char *net) {
    int eth_carrier, eth_rx, eth_tx;
    int wlan_carrier, wlan_rx, wlan_tx;
-   char *eth_colour, *wlan_colour;
+   int vpn;
+   char *eth_colour, *wlan_colour, *vpn_colour;
 
    DIR *d;
    struct dirent *dir;
    FILE *fd;
-   int dbm;
+   int dbm, pct;
    char quality[7] = "";
    char profile[10] = "";
 
    get_interface_stats("eth0", &eth_carrier, &eth_rx, &eth_tx);
    get_interface_stats("wlan0", &wlan_carrier, &wlan_rx, &wlan_tx);
+   vpn = read_file_int("/sys/class/net/tun0/carrier", 0);
 
    get_interface_colour(&eth_colour, "eth0", eth_carrier);
    get_interface_colour(&wlan_colour, "wlan0", wlan_carrier);
+   get_interface_colour(&vpn_colour, "tun0", vpn);
 
    if((d = opendir ("/var/run/network/profiles/"))) {
       readdir(d); readdir(d); /* read . and .. */
@@ -257,31 +264,35 @@ void get_net_str(char *net) {
       fscanf(fd, "wlan0: %*d %*d. -%d.", &dbm);
       fclose(fd);
       if (dbm)
-         snprintf(quality, 7, "%d%s%% ", 100-(abs(dbm)-40)*100/60, Unit);
+         pct = 100-(abs(dbm)-40)*100/60;
+         pct = pct >= 0 ? pct : 0;
+         snprintf(quality, 7, "%d%s%% ", pct, Unit);
    }
 
-   snprintf(net, 100, "%sETH0 %sRx %s%d%sMB %sTx %s%d%sMB %s %sWLAN0 %s%s%s%sRx %s%d%sMB %sTx %s%d%sMB%s", eth_colour, Title, Value, eth_rx, Unit, Title, Value, eth_tx, Unit, Sep, wlan_colour, Value, profile, quality, Title, Value, wlan_rx, Unit, Title, Value, wlan_tx, Unit, Title);
+   snprintf(net, 100, "%sVPN %s %sETH0 %sRx %s%d%sMB %sTx %s%d%sMB %s %sWLAN0 %s%s%s%sRx %s%d%sMB %sTx %s%d%sMB%s", vpn_colour, Sep, eth_colour, Title, Value, eth_rx, Unit, Title, Value, eth_tx, Unit, Sep, wlan_colour, Value, profile, quality, Title, Value, wlan_rx, Unit, Title, Value, wlan_tx, Unit, Title);
 }
 
 void get_bat_str(char *bat) {
    int energy_now, energy_full, voltage_now;
-   int present;
    int level;
    char *power = "BAT";
    char *colour;
+   FILE *fd;
 
-   energy_now  = read_file_int("/sys/class/power_supply/BAT0/energy_now");
-   energy_full = read_file_int("/sys/class/power_supply/BAT0/energy_full");
-   voltage_now = read_file_int("/sys/class/power_supply/BAT0/voltage_now");
-   present     = read_file_int("/sys/class/power_supply/BAT0/present");
+   energy_now  = read_file_int("/sys/class/power_supply/BAT0/energy_now", 1);
+   energy_full = read_file_int("/sys/class/power_supply/BAT0/energy_full", 1);
+   voltage_now = read_file_int("/sys/class/power_supply/BAT0/voltage_now", 1);
 
-   if (present == 1)
-      power = "AC";
+   if((fd=fopen("/sys/class/power_supply/BAT0/status", "r"))) {
+      if(fscanf(fd, "Discharging%*s")==0)
+         power = "AC";
+      fclose(fd);
+   }
 
    level = ((float)energy_now * 1000 / (float)voltage_now) * 100 / ((float)energy_full * 1000 / (float)voltage_now);
 
    get_colour(&colour, 100-level, 75, 90);
-   snprintf(bat, 13, "%s%s %s%1d%s%%%s", Title, power, Value, level, Unit, Title);
+   snprintf(bat, 13, "%s%s %s%1d%s%%%s", Title, power, colour, level, Unit, Title);
 }
 
 void get_datetime(char *datetime) {
